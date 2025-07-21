@@ -11,10 +11,22 @@ function updateBalance() {
 function renderTransactions() {
   const container = document.getElementById('transaction-list');
   container.innerHTML = '';
+
+  // Aggregate transactions by description
+  const transactionMap = new Map();
   transactions.forEach(tx => {
+    const key = `<strong>${tx.title}</strong><br>Rp ${tx.amount.toLocaleString('id-ID')}`;
+    transactionMap.set(key, {
+      count: (transactionMap.get(key)?.count || 0) + 1,
+      type: tx.type
+    });
+  });
+
+  // Render aggregated transactions
+  transactionMap.forEach((data, description) => {
     const div = document.createElement('div');
-    div.className = `p-4 rounded-lg text-white ${tx.type === 'income' ? 'bg-teal-500' : 'bg-red-500'} fade-in`;
-    div.innerHTML = `<strong>${tx.title}</strong><br>Rp ${tx.amount.toLocaleString('id-ID')}`;
+    div.className = `p-4 rounded-lg text-white ${data.type === 'income' ? 'bg-teal-500' : 'bg-red-500'} fade-in`;
+    div.innerHTML = data.count > 1 ? `${description} (x${data.count})` : description;
     container.appendChild(div);
   });
 }
@@ -26,7 +38,6 @@ function renderSavings() {
     const percent = Math.min((save.saved / save.target) * 100, 100).toFixed(2);
     const est = Math.max(Math.ceil((save.target - save.saved) / save.amountPerSave), 0);
     const isCompleted = save.saved >= save.target;
-    console.log(`Rendering: ${save.item}, saved: ${save.saved}, target: ${save.target}, percent: ${percent}%`);
     const card = document.createElement('div');
     card.className = 'bg-white p-5 rounded-xl shadow-lg border border-gray-100 card-hover transition-all duration-300 fade-in';
     card.innerHTML = `
@@ -52,22 +63,30 @@ function renderHistory() {
   const container = document.getElementById('history-list');
   container.innerHTML = '';
   const today = new Date().toDateString();
+
+  // Aggregate transactions and savings activities
+  const historyMap = new Map();
   transactions
     .filter(t => new Date(t.date).toDateString() === today)
     .forEach(tx => {
-      const div = document.createElement('div');
-      div.className = 'p-4 bg-white rounded-lg shadow-md fade-in';
-      div.textContent = `${tx.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}: ${tx.title} - Rp ${tx.amount.toLocaleString('id-ID')}`;
-      container.appendChild(div);
+      const key = `${tx.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}: ${tx.title} - Rp ${tx.amount.toLocaleString('id-ID')}`;
+      historyMap.set(key, (historyMap.get(key) || 0) + 1);
     });
+
   savings
     .filter(s => s.history && s.history.includes(today))
     .forEach(s => {
-      const div = document.createElement('div');
-      div.className = 'p-4 bg-white rounded-lg shadow-md fade-in';
-      div.textContent = `Menabung untuk ${s.item}`;
-      container.appendChild(div);
+      const key = `Menabung untuk ${s.item}`;
+      historyMap.set(key, (historyMap.get(key) || 0) + 1);
     });
+
+  // Render aggregated history
+  historyMap.forEach((count, description) => {
+    const div = document.createElement('div');
+    div.className = 'p-4 bg-white rounded-lg shadow-md fade-in';
+    div.textContent = count > 1 ? `${description} (x${count})` : description;
+    container.appendChild(div);
+  });
 }
 
 function openModal(type) {
@@ -86,9 +105,19 @@ function closeModal() {
 
 function addTransaction(e) {
   e.preventDefault();
-  const title = document.getElementById('form-judul').value;
+  const title = document.getElementById('form-judul').value.trim();
   const amount = parseInt(document.getElementById('form-nominal').value);
   const type = document.getElementById('modal').dataset.type;
+
+  if (!title) {
+    Swal.fire({
+      title: 'Error',
+      text: 'Judul transaksi tidak boleh kosong',
+      icon: 'error',
+      confirmButtonColor: '#10b981'
+    });
+    return;
+  }
 
   if (amount <= 0) {
     Swal.fire({
@@ -120,13 +149,23 @@ function addTransaction(e) {
 
 function addSaving(e) {
   e.preventDefault();
-  const item = document.getElementById('tabungan-nama').value;
+  const item = document.getElementById('tabungan-nama').value.trim();
   const target = parseInt(document.getElementById('tabungan-harga').value);
-  const saved = 0; // Saldo awal selalu 0, karena sinkron dengan current-balance
+  const saved = 0;
   const amountPerSave = parseInt(document.getElementById('tabungan-nominal').value);
   const imageInput = document.getElementById('tabungan-gambar');
   const fileLabel = document.getElementById('file-label');
   const fileName = document.getElementById('file-name');
+
+  if (!item) {
+    Swal.fire({
+      title: 'Error',
+      text: 'Nama barang tidak boleh kosong',
+      icon: 'error',
+      confirmButtonColor: '#10b981'
+    });
+    return;
+  }
 
   if (target <= 0 || amountPerSave <= 0) {
     Swal.fire({
@@ -144,25 +183,33 @@ function addSaving(e) {
     reader.onload = e => {
       image = e.target.result;
       savings.push({ item, target, saved, amountPerSave, image, history: [] });
-      console.log(`Added: ${item}, saved: ${saved}, target: ${target}`);
       renderSavings();
       renderHistory();
-      fileLabel.classList.remove('file-selected');
-      fileName.classList.add('hidden');
-      fileName.textContent = '';
+      resetFileInput();
+    };
+    reader.onerror = () => {
+      Swal.fire({
+        title: 'Error',
+        text: 'Gagal membaca file gambar',
+        icon: 'error',
+        confirmButtonColor: '#10b981'
+      });
     };
     reader.readAsDataURL(imageInput.files[0]);
   } else {
     savings.push({ item, target, saved, amountPerSave, image, history: [] });
-    console.log(`Added: ${item}, saved: ${saved}, target: ${target}`);
     renderSavings();
     renderHistory();
-    fileLabel.classList.remove('file-selected');
-    fileName.classList.add('hidden');
-    fileName.textContent = '';
+    resetFileInput();
   }
 
   e.target.reset();
+
+  function resetFileInput() {
+    fileLabel.classList.remove('file-selected');
+    fileName.classList.remove('visible');
+    fileName.textContent = '';
+  }
 }
 
 function handleTabung(index) {
@@ -188,8 +235,6 @@ function handleTabung(index) {
     date: new Date()
   });
 
-  console.log(`Tabung: ${savings[index].item}, saved: ${savings[index].saved}, target: ${savings[index].target}`);
-
   if (savings[index].saved >= savings[index].target) {
     Swal.fire({
       title: 'Selamat!',
@@ -212,11 +257,11 @@ function updateFileIndicator() {
   imageInput.addEventListener('change', () => {
     if (imageInput.files && imageInput.files[0]) {
       fileLabel.classList.add('file-selected');
-      fileName.classList.remove('hidden');
+      fileName.classList.add('visible');
       fileName.textContent = imageInput.files[0].name;
     } else {
       fileLabel.classList.remove('file-selected');
-      fileName.classList.add('hidden');
+      fileName.classList.remove('visible');
       fileName.textContent = '';
     }
   });
